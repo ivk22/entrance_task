@@ -1,0 +1,135 @@
+drop table if exists dbo.T_CONTRACTOR_SHEDULER
+drop table if exists dbo.T_CONTRACTOR_WORK_DAY 
+drop procedure if exists dbo.COUNT_WORK_DAYS
+
+
+-- Задание 1.
+
+create table dbo.T_CONTRACTOR_SHEDULER  
+   (ID_NAME int identity(1,1) primary key,  
+   FIO nvarchar(25) not null,  
+   SHEDULE nvarchar(25) not null,  
+   DATE_BEGIN  date not null,
+   DATE_END date not null,
+   unique(FIO, DATE_BEGIN),
+   check(DATE_END>=DATE_BEGIN))
+
+insert dbo.T_CONTRACTOR_SHEDULER (FIO, SHEDULE, DATE_BEGIN, DATE_END)
+    values
+        ('поставщик 1', 'дддвсвнн', '01.01.2019 0:00','10.01.2019 0:00'),
+        ('поставщик 1', 'ннвннв', '11.01.2019 0:00','15.01.2019 0:00'),
+        ('поставщик 1', 'св', '16.01.2019 0:00','20.01.2019 0:00'),
+        ('поставщик 2', 'свсвсв', '01.01.2019 0:00','07.01.2019 0:00'),
+        ('поставщик 2', 'днвсв', '08.01.2019 0:00','14.01.2019 0:00'),
+        ('поставщик 2', 'ннддвсв', '15.01.2019 0:00','31.12.9999 0:00'),
+        ('поставщик 3', 'нвнвнв', '01.01.2019 0:00','01.02.2019 0:00'),
+        ('поставщик 3', 'двдвдвдв', '02.02.2019 0:00','31.12.9999 0:00')
+
+-- Задание 2.
+create table dbo.T_CONTRACTOR_WORK_DAY  
+   (ID int identity(1,1) primary key,  
+   FIO nvarchar(25) not null,   
+   DATE_BEGIN  datetime not null,
+   DATE_END datetime not null)
+
+
+-- Задание 3.
+go
+create procedure dbo.COUNT_WORK_DAYS
+(@start date, @end date)
+as
+begin
+    set nocount on
+	-- создание временной таблицы, содержащей необходимые поля
+	select substring(FIO,len(FIO),1) as FIO,DATE_BEGIN,DATE_END, SHEDULE, datediff(day,DATE_BEGIN ,(select max(v) 
+	   from (values (DATE_BEGIN), (@start)) as value(v)))+1 as START_POS,
+	   (select max(v) 
+	   from (values (DATE_BEGIN), (@start)) as value(v)) as DATE_START,
+	   datediff(day,(select max(v) 
+	   from (values (DATE_BEGIN), (@start)) as value(v)), (select min(v) 
+	   from (values (DATE_END), (@end)) as value(v)))+1 as DIFF,
+
+	   ceiling((datediff(day, DATE_BEGIN ,(select min(v) 
+	   from (values (DATE_END), (@end)) as value(v)))+1)/cast(len(SHEDULE) as float)) as N_REPS
+
+	   into #t from dbo.T_CONTRACTOR_SHEDULER where datediff(day,(select max(v) 
+	   from (values (DATE_BEGIN), (@start)) as value(v)),(select min(v) 
+	   from (values (DATE_END), (@end)) as value(v))) >=0
+
+
+	declare @str nvarchar(3000)
+	-- формирование строки, содержащей информацию о значениях, которые нужно добавить в таблицу
+	select @str = coalesce(@str,'')+concat(FIO,substring(replicate(SHEDULE,N_REPS),START_POS,DIFF)) from #t
+
+
+	declare @i int
+	declare @j int
+	declare @name nvarchar(25)
+	declare @ch nvarchar(25)
+	declare @id nvarchar(25)
+	declare @date datetime
+
+	select @id = '0'
+
+	select @i = 1
+	select @j = len(@str)
+	-- цикл, проходящий по строке @str и добавляющий необходимые значения в таблицу
+	while @i<=@j
+	begin
+		select @ch = substring(@str,@i,1)
+		if @ch = 'д'
+		begin
+			insert dbo.T_CONTRACTOR_WORK_DAY (FIO,DATE_BEGIN, DATE_END)
+				values
+					(concat('Поставщик ',@id),dateadd(hour,8,@date),dateadd(hour,20,@date))
+			select @date = dateadd(day,1,@date)
+		end
+		else if @ch = 'с'
+		begin
+			insert dbo.T_CONTRACTOR_WORK_DAY (FIO,DATE_BEGIN, DATE_END)
+				values
+					(concat('Поставщик ',@id),dateadd(hour,8,@date),dateadd(hour,32,@date))
+			select @date = dateadd(day,1,@date)
+		end
+
+		else if @ch = 'н'
+		begin
+			insert dbo.T_CONTRACTOR_WORK_DAY (FIO,DATE_BEGIN, DATE_END)
+				values
+					(concat('Поставщик ',@id),dateadd(hour,20,@date),dateadd(hour,32,@date))
+			select @date = dateadd(day,1,@date)
+		end
+		else if @ch = 'в'
+		begin
+			select @date = dateadd(day,1,@date)
+		end
+
+		else
+		begin
+			if @ch<>@id
+			begin
+			select @id = @ch
+			select @date=min(DATE_START) from #t where FIO=@id
+			end
+		end
+		select @i = @i+1
+	end
+end
+go
+
+exec COUNT_WORK_DAYS @start='01.01.2019', @end = '31.01.2019';
+
+-- Задание 4.
+
+-- число рабочих дней 
+select FIO, count(*) as N_WORK_DAYS from dbo.T_CONTRACTOR_WORK_DAY group by fio
+
+-- поставщики с # рабочих дней в январе больше 10
+select FIO from dbo.T_CONTRACTOR_WORK_DAY group by FIO having count(*)>10
+
+-- поставщики, кто работал 14,15 и 16 января
+select FIO from dbo.T_CONTRACTOR_WORK_DAY where 
+	cast(DATE_BEGIN as date)='14.01.2019' or 
+	cast(DATE_BEGIN as date)='15.01.2019' or 
+	cast(DATE_BEGIN as date)='16.01.2019' 
+	group by FIO having count(*)=3
